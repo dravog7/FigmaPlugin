@@ -16,7 +16,7 @@ async function exportSelectionToZip() {
   }
 
   const styles = collectStylesFromSelection(selection);
-  const tree = selection.map(serializeNode);
+  const tree = await Promise.all(selection.map((node) => serializeNode(node)));
   const assets = await collectImageAssetsFromSelection(selection);
   const payload = buildPayload(selection, styles, tree, assets);
 
