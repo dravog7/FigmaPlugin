@@ -50,7 +50,7 @@
     return "bin";
   }
   function sanitizeForFileName(value) {
-    return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
   }
   function collectPaintImages(paints, imageUsageByHash, usageName) {
     if (!paints || isMixed(paints)) {
@@ -63,14 +63,9 @@
       imageUsageByHash.set(paint.imageHash, usageName);
     }
   }
-  function clampUsageName(usageName) {
-    if (usageName.length <= 96) {
-      return usageName;
-    }
-    return usageName.slice(0, 96);
-  }
   function buildUniquePath(usageName, shortHash, extension, usedPaths, fullHash) {
-    const baseName = `${clampUsageName(usageName)}-${shortHash}`;
+    const safeName = usageName || "image";
+    const baseName = `${safeName}-${shortHash}`;
     let path = `assets/${baseName}.${extension}`;
     if (!usedPaths.has(path)) {
       usedPaths.add(path);
@@ -92,19 +87,18 @@
   }
   async function collectImageAssetsFromSelection(selection) {
     const imageUsageByHash = /* @__PURE__ */ new Map();
-    function walk(node, parentPath) {
-      const nodePart = sanitizeForFileName(node.name) || node.type.toLowerCase();
-      const usageName = parentPath ? `${parentPath}-${nodePart}` : nodePart;
+    function walk(node) {
+      const usageName = sanitizeForFileName(node.name) || node.type.toLowerCase();
       if ("fills" in node) collectPaintImages(node.fills, imageUsageByHash, usageName);
       if ("strokes" in node) collectPaintImages(node.strokes, imageUsageByHash, usageName);
       if ("children" in node) {
         for (const child of node.children) {
-          walk(child, usageName);
+          walk(child);
         }
       }
     }
     for (const node of selection) {
-      walk(node, "");
+      walk(node);
     }
     const assets = [];
     const usedPaths = /* @__PURE__ */ new Set();
@@ -116,7 +110,7 @@
       const bytes = await image.getBytesAsync();
       const extension = detectExtension(bytes);
       const shortHash = hash.slice(0, 3).toLowerCase();
-      const path = buildUniquePath(usageName || "image", shortHash, extension, usedPaths, hash);
+      const path = buildUniquePath(usageName, shortHash, extension, usedPaths, hash);
       assets.push({ hash, path, bytes });
     }
     return assets;
@@ -146,6 +140,26 @@
   }
 
   // src/serializer.ts
+  function getNodeImageHashes(node) {
+    const hashes = /* @__PURE__ */ new Set();
+    function collectFromPaints(paints) {
+      if (!paints || isMixed(paints)) {
+        return;
+      }
+      for (const paint of paints) {
+        if (paint && paint.type === "IMAGE" && paint.imageHash) {
+          hashes.add(paint.imageHash);
+        }
+      }
+    }
+    if ("fills" in node) {
+      collectFromPaints(node.fills);
+    }
+    if ("strokes" in node) {
+      collectFromPaints(node.strokes);
+    }
+    return Array.from(hashes);
+  }
   function replaceImageHashesInValue(value, imagePathByHash) {
     if (typeof value === "string") {
       let next = value;
@@ -168,6 +182,23 @@
     }
     return patched;
   }
+  function patchCssPlaceholders(css, imagePaths) {
+    if (!css || typeof css !== "object" || Array.isArray(css)) {
+      return css;
+    }
+    const patched = {};
+    let imageIndex = 0;
+    for (const [key, value] of Object.entries(css)) {
+      if (typeof value === "string" && value.includes("<path-to-image>") && imagePaths.length) {
+        const resolvedPath = imagePaths[Math.min(imageIndex, imagePaths.length - 1)];
+        patched[key] = value.replace("<path-to-image>", resolvedPath);
+        imageIndex += 1;
+        continue;
+      }
+      patched[key] = value;
+    }
+    return patched;
+  }
   async function getCss(node, imagePathByHash) {
     if (!("getCSSAsync" in node)) {
       return null;
@@ -175,7 +206,8 @@
     try {
       const css = await node.getCSSAsync();
       const patchedCss = replaceImageHashesInValue(css, imagePathByHash);
-      return cleanValue(patchedCss);
+      const nodeImagePaths = getNodeImageHashes(node).map((hash) => imagePathByHash[hash]).filter((value) => Boolean(value));
+      return cleanValue(patchCssPlaceholders(patchedCss, nodeImagePaths));
     } catch (e) {
       return null;
     }
@@ -186,12 +218,16 @@
     }
     return node.characters;
   }
+  function getNodeImages(node, imagePathByHash) {
+    return getNodeImageHashes(node).map((hash) => imagePathByHash[hash]).filter((value) => Boolean(value));
+  }
   async function serializeNode(node, imagePathByHash) {
     const serialized = {
       id: node.id,
       name: node.name,
       type: node.type,
       css: await getCss(node, imagePathByHash),
+      images: getNodeImages(node, imagePathByHash),
       text: getText(node),
       interactions: cleanValue("reactions" in node ? node.reactions : null)
     };
