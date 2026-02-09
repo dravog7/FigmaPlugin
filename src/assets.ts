@@ -61,6 +61,46 @@ function collectPaintImages(
   }
 }
 
+function clampUsageName(usageName: string): string {
+  if (usageName.length <= 96) {
+    return usageName;
+  }
+  return usageName.slice(0, 96);
+}
+
+function buildUniquePath(
+  usageName: string,
+  shortHash: string,
+  extension: string,
+  usedPaths: Set<string>,
+  fullHash: string
+): string {
+  const baseName = `${clampUsageName(usageName)}-${shortHash}`;
+  let path = `assets/${baseName}.${extension}`;
+
+  if (!usedPaths.has(path)) {
+    usedPaths.add(path);
+    return path;
+  }
+
+  const collisionSuffix = fullHash.slice(3, 6).toLowerCase();
+  path = `assets/${baseName}-${collisionSuffix}.${extension}`;
+
+  if (!usedPaths.has(path)) {
+    usedPaths.add(path);
+    return path;
+  }
+
+  let index = 2;
+  while (usedPaths.has(path)) {
+    path = `assets/${baseName}-${collisionSuffix}-${index}.${extension}`;
+    index += 1;
+  }
+
+  usedPaths.add(path);
+  return path;
+}
+
 export async function collectImageAssetsFromSelection(selection: ReadonlyArray<SceneNode>): Promise<ExportedAsset[]> {
   const imageUsageByHash = new Map<string, string>();
 
@@ -83,6 +123,8 @@ export async function collectImageAssetsFromSelection(selection: ReadonlyArray<S
   }
 
   const assets: ExportedAsset[] = [];
+  const usedPaths = new Set<string>();
+
   for (const [hash, usageName] of imageUsageByHash.entries()) {
     const image = figma.getImageByHash(hash);
     if (!image) {
@@ -92,7 +134,7 @@ export async function collectImageAssetsFromSelection(selection: ReadonlyArray<S
     const bytes = await image.getBytesAsync();
     const extension = detectExtension(bytes);
     const shortHash = hash.slice(0, 3).toLowerCase();
-    const path = `assets/${usageName}-${shortHash}.${extension}`;
+    const path = buildUniquePath(usageName || 'image', shortHash, extension, usedPaths, hash);
 
     assets.push({ hash, path, bytes });
   }
