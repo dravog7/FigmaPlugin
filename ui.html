@@ -1,0 +1,214 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+  </head>
+  <body>
+    <script>
+      const textEncoder = new TextEncoder();
+
+      function crc32(bytes) {
+        let crc = -1;
+        for (let i = 0; i < bytes.length; i++) {
+          crc ^= bytes[i];
+          for (let j = 0; j < 8; j++) {
+            crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+          }
+        }
+        return (crc ^ -1) >>> 0;
+      }
+
+      function concatArrays(chunks) {
+        const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+        const result = new Uint8Array(total);
+        let offset = 0;
+        for (const chunk of chunks) {
+          result.set(chunk, offset);
+          offset += chunk.length;
+        }
+        return result;
+      }
+
+      function u16(value) {
+        return [value & 0xff, (value >>> 8) & 0xff];
+      }
+
+      function u32(value) {
+        return [value & 0xff, (value >>> 8) & 0xff, (value >>> 16) & 0xff, (value >>> 24) & 0xff];
+      }
+
+      function detectExtension(bytes) {
+        if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+          return 'png';
+        }
+        if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+          return 'jpg';
+        }
+        if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
+          return 'gif';
+        }
+        if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
+          return 'bmp';
+        }
+        if (
+          bytes.length >= 12 &&
+          bytes[0] === 0x52 &&
+          bytes[1] === 0x49 &&
+          bytes[2] === 0x46 &&
+          bytes[3] === 0x46 &&
+          bytes[8] === 0x57 &&
+          bytes[9] === 0x45 &&
+          bytes[10] === 0x42 &&
+          bytes[11] === 0x50
+        ) {
+          return 'webp';
+        }
+        return 'bin';
+      }
+
+      function buildZip(files) {
+        const localHeaders = [];
+        const centralHeaders = [];
+        let offset = 0;
+
+        for (const file of files) {
+          const fileNameBytes = textEncoder.encode(file.path);
+          const data = file.data;
+          const crc = crc32(data);
+
+          const localHeader = new Uint8Array([
+            0x50, 0x4b, 0x03, 0x04,
+            ...u16(20),
+            ...u16(0),
+            ...u16(0),
+            ...u16(0),
+            ...u16(0),
+            ...u32(crc),
+            ...u32(data.length),
+            ...u32(data.length),
+            ...u16(fileNameBytes.length),
+            ...u16(0),
+            ...fileNameBytes
+          ]);
+
+          localHeaders.push(localHeader, data);
+
+          const centralHeader = new Uint8Array([
+            0x50, 0x4b, 0x01, 0x02,
+            ...u16(20),
+            ...u16(20),
+            ...u16(0),
+            ...u16(0),
+            ...u16(0),
+            ...u16(0),
+            ...u32(crc),
+            ...u32(data.length),
+            ...u32(data.length),
+            ...u16(fileNameBytes.length),
+            ...u16(0),
+            ...u16(0),
+            ...u16(0),
+            ...u16(0),
+            ...u32(0),
+            ...u32(offset),
+            ...fileNameBytes
+          ]);
+
+          centralHeaders.push(centralHeader);
+          offset += localHeader.length + data.length;
+        }
+
+        const centralDirectory = concatArrays(centralHeaders);
+        const localData = concatArrays(localHeaders);
+
+        const endOfCentralDirectory = new Uint8Array([
+          0x50, 0x4b, 0x05, 0x06,
+          ...u16(0),
+          ...u16(0),
+          ...u16(files.length),
+          ...u16(files.length),
+          ...u32(centralDirectory.length),
+          ...u32(localData.length),
+          ...u16(0)
+        ]);
+
+        return concatArrays([localData, centralDirectory, endOfCentralDirectory]);
+      }
+
+      function normalizePayload(payload) {
+        const imagePathByHash = {};
+        const assets = payload.assets.map((asset) => {
+          const bytes = new Uint8Array(asset.bytes);
+          const extension = detectExtension(bytes);
+          const path = `assets/${asset.hash}.${extension}`;
+          imagePathByHash[asset.hash] = path;
+          return { path, data: bytes };
+        });
+
+        function patchImages(value) {
+          if (Array.isArray(value)) {
+            return value.map(patchImages);
+          }
+
+          if (!value || typeof value !== 'object') {
+            return value;
+          }
+
+          const next = {};
+          for (const [key, current] of Object.entries(value)) {
+            if (key === 'imageRef' && typeof current === 'string') {
+              const hash = current.replace('assets/', '');
+              next[key] = imagePathByHash[hash] || current;
+            } else {
+              next[key] = patchImages(current);
+            }
+          }
+          return next;
+        }
+
+        return {
+          design: patchImages({
+            meta: payload.meta,
+            styles: payload.styles,
+            tree: payload.tree
+          }),
+          assets
+        };
+      }
+
+      onmessage = (event) => {
+        if (event.data.pluginMessage?.type !== 'export-payload') {
+          return;
+        }
+
+        try {
+          const normalized = normalizePayload(event.data.pluginMessage.payload);
+          const designBytes = textEncoder.encode(JSON.stringify(normalized.design, null, 2));
+          const zipBytes = buildZip([{ path: 'design.json', data: designBytes }, ...normalized.assets]);
+
+          const blob = new Blob([zipBytes], { type: 'application/zip' });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement('a');
+          anchor.href = url;
+          anchor.download = 'figma-design-export.zip';
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          URL.revokeObjectURL(url);
+
+          parent.postMessage({ pluginMessage: { type: 'export-done' } }, '*');
+        } catch (error) {
+          parent.postMessage(
+            {
+              pluginMessage: {
+                type: 'export-failed',
+                error: error instanceof Error ? error.message : String(error)
+              }
+            },
+            '*'
+          );
+        }
+      };
+    </script>
+  </body>
+</html>
