@@ -141,7 +141,8 @@
         const assets = sourceAssets.map((asset) => {
           const bytes = new Uint8Array(asset.bytes);
           const extension = detectExtension(bytes);
-          const path = `assets/${asset.hash}.${extension}`;
+          const fallbackPath = `assets/${asset.hash}.${extension}`;
+          const path = typeof asset.path === 'string' && asset.path ? asset.path : fallbackPath;
           imagePathByHash[asset.hash] = path;
           return { path, data: bytes };
         });
