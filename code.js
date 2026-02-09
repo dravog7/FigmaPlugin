@@ -1,327 +1,331 @@
-figma.showUI(__html__, { visible: false });
-
-const NODE_PROPS = [
-  'id',
-  'type',
-  'name',
-  'visible',
-  'locked',
-  'opacity',
-  'blendMode',
-  'isMask',
-  'maskType',
-  'clipsContent',
-  'x',
-  'y',
-  'width',
-  'height',
-  'rotation',
-  'relativeTransform',
-  'absoluteTransform',
-  'constraints',
-  'layoutAlign',
-  'layoutGrow',
-  'layoutMode',
-  'layoutPositioning',
-  'layoutWrap',
-  'primaryAxisAlignItems',
-  'counterAxisAlignItems',
-  'primaryAxisSizingMode',
-  'counterAxisSizingMode',
-  'itemSpacing',
-  'counterAxisSpacing',
-  'paddingTop',
-  'paddingRight',
-  'paddingBottom',
-  'paddingLeft',
-  'cornerRadius',
-  'topLeftRadius',
-  'topRightRadius',
-  'bottomLeftRadius',
-  'bottomRightRadius',
-  'strokesIncludedInLayout',
-  'fills',
-  'strokes',
-  'strokeWeight',
-  'strokeAlign',
-  'strokeJoin',
-  'strokeCap',
-  'strokeMiterLimit',
-  'dashPattern',
-  'effects',
-  'effectStyleId',
-  'fillStyleId',
-  'strokeStyleId',
-  'textStyleId',
-  'characters',
-  'fontSize',
-  'fontName',
-  'textCase',
-  'textDecoration',
-  'textAlignHorizontal',
-  'textAlignVertical',
-  'textAutoResize',
-  'lineHeight',
-  'letterSpacing',
-  'paragraphSpacing',
-  'paragraphIndent',
-  'listSpacing',
-  'hyperlink',
-  'maxLines',
-  'exportSettings',
-  'componentId',
-  'componentProperties',
-  'boundVariables'
-];
-
-function isMixed(value) {
-  return value === figma.mixed;
-}
-
-function isObject(value) {
-  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
-}
-
-function cloneWithImageRef(paint) {
-  const copy = {};
-  for (const key in paint) {
-    copy[key] = paint[key];
+"use strict";
+(() => {
+  // src/utils.ts
+  function isMixed(value) {
+    return value === figma.mixed;
   }
-  copy.imageRef = paint.imageHash ? 'assets/' + paint.imageHash : null;
-  return copy;
-}
-
-function mapPaints(paints) {
-  if (!paints || isMixed(paints)) {
-    return null;
+  function isObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   }
-
-  const mapped = [];
-  for (const paint of paints) {
-    if (!paint || paint.type !== 'IMAGE') {
-      mapped.push(paint);
-      continue;
+  function cleanValue(value) {
+    if (value === void 0 || typeof value === "function" || typeof value === "symbol") {
+      return void 0;
     }
-
-    mapped.push(cloneWithImageRef(paint));
-  }
-
-  return mapped;
-}
-
-function cleanValue(value) {
-  if (value === undefined || typeof value === 'function' || typeof value === 'symbol') {
-    return undefined;
-  }
-
-  if (isMixed(value)) {
-    return null;
-  }
-
-  if (Array.isArray(value)) {
-    const cleanedItems = [];
-    for (const item of value) {
-      cleanedItems.push(cleanValue(item));
+    if (isMixed(value)) {
+      return null;
     }
-    return cleanedItems;
-  }
-
-  if (isObject(value)) {
-    const cleanedObject = {};
-    for (const key of Object.keys(value)) {
-      const cleanedNested = cleanValue(value[key]);
-      if (cleanedNested !== undefined) {
-        cleanedObject[key] = cleanedNested;
+    if (Array.isArray(value)) {
+      return value.map(cleanValue);
+    }
+    if (isObject(value)) {
+      const cleanedObject = {};
+      for (const key of Object.keys(value)) {
+        const cleanedNested = cleanValue(value[key]);
+        if (cleanedNested !== void 0) {
+          cleanedObject[key] = cleanedNested;
+        }
       }
+      return cleanedObject;
     }
-    return cleanedObject;
+    return value;
   }
 
-  return value;
-}
-
-function getSerializableNodeValue(node, prop) {
-  if (!(prop in node)) {
-    return undefined;
-  }
-
-  let value = node[prop];
-  if ((prop === 'fills' || prop === 'strokes') && value) {
-    value = mapPaints(value);
-  }
-
-  return cleanValue(value);
-}
-
-function serializeNode(node) {
-  const serialized = {};
-
-  for (const prop of NODE_PROPS) {
-    const value = getSerializableNodeValue(node, prop);
-    if (value !== undefined) {
-      serialized[prop] = value;
+  // src/assets.ts
+  function detectExtension(bytes) {
+    if (bytes.length >= 8 && bytes[0] === 137 && bytes[1] === 80 && bytes[2] === 78 && bytes[3] === 71) {
+      return "png";
     }
-  }
-
-  if ('children' in node) {
-    const children = [];
-    for (const child of node.children) {
-      children.push(serializeNode(child));
+    if (bytes.length >= 3 && bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) {
+      return "jpg";
     }
-    serialized.children = children;
-  }
-
-  return serialized;
-}
-
-function serializeStyle(styleId) {
-  if (!styleId || isMixed(styleId)) {
-    return null;
-  }
-
-  const style = figma.getStyleById(styleId);
-  if (!style) {
-    return null;
-  }
-
-  return {
-    id: style.id,
-    key: style.key,
-    name: style.name,
-    type: style.type,
-    remote: style.remote,
-    description: style.description
-  };
-}
-
-function collectStylesFromSelection(selection) {
-  const styleIds = new Set();
-
-  function remember(styleId) {
-    if (styleId && !isMixed(styleId)) {
-      styleIds.add(styleId);
+    if (bytes.length >= 6 && bytes[0] === 71 && bytes[1] === 73 && bytes[2] === 70) {
+      return "gif";
     }
-  }
-
-  function walk(node) {
-    if ('fillStyleId' in node) remember(node.fillStyleId);
-    if ('strokeStyleId' in node) remember(node.strokeStyleId);
-    if ('effectStyleId' in node) remember(node.effectStyleId);
-    if ('textStyleId' in node) remember(node.textStyleId);
-
-    if ('children' in node) {
-      for (const child of node.children) {
-        walk(child);
-      }
+    if (bytes.length >= 2 && bytes[0] === 66 && bytes[1] === 77) {
+      return "bmp";
     }
-  }
-
-  for (const node of selection) {
-    walk(node);
-  }
-
-  const styles = [];
-  for (const styleId of styleIds) {
-    const style = serializeStyle(styleId);
-    if (style) {
-      styles.push(style);
+    if (bytes.length >= 12 && bytes[0] === 82 && bytes[1] === 73 && bytes[2] === 70 && bytes[3] === 70 && bytes[8] === 87 && bytes[9] === 69 && bytes[10] === 66 && bytes[11] === 80) {
+      return "webp";
     }
+    return "bin";
   }
-  return styles;
-}
-
-async function collectImageAssetsFromSelection(selection) {
-  const imageHashes = new Set();
-
-  function collectPaintImages(paints) {
+  function sanitizeForFileName(value) {
+    return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 64);
+  }
+  function collectPaintImages(paints, imageUsageByHash, usageName) {
     if (!paints || isMixed(paints)) {
       return;
     }
-
     for (const paint of paints) {
-      if (paint && paint.type === 'IMAGE' && paint.imageHash) {
-        imageHashes.add(paint.imageHash);
+      if (!paint || paint.type !== "IMAGE" || !paint.imageHash || imageUsageByHash.has(paint.imageHash)) {
+        continue;
+      }
+      imageUsageByHash.set(paint.imageHash, usageName);
+    }
+  }
+  function buildUniquePath(usageName, shortHash, extension, usedPaths, fullHash) {
+    const safeName = usageName || "image";
+    const baseName = `${safeName}-${shortHash}`;
+    let path = `assets/${baseName}.${extension}`;
+    if (!usedPaths.has(path)) {
+      usedPaths.add(path);
+      return path;
+    }
+    const collisionSuffix = fullHash.slice(3, 6).toLowerCase();
+    path = `assets/${baseName}-${collisionSuffix}.${extension}`;
+    if (!usedPaths.has(path)) {
+      usedPaths.add(path);
+      return path;
+    }
+    let index = 2;
+    while (usedPaths.has(path)) {
+      path = `assets/${baseName}-${collisionSuffix}-${index}.${extension}`;
+      index += 1;
+    }
+    usedPaths.add(path);
+    return path;
+  }
+  async function collectImageAssetsFromSelection(selection) {
+    const imageUsageByHash = /* @__PURE__ */ new Map();
+    function walk(node) {
+      const usageName = sanitizeForFileName(node.name) || node.type.toLowerCase();
+      if ("fills" in node) collectPaintImages(node.fills, imageUsageByHash, usageName);
+      if ("strokes" in node) collectPaintImages(node.strokes, imageUsageByHash, usageName);
+      if ("children" in node) {
+        for (const child of node.children) {
+          walk(child);
+        }
       }
     }
-  }
-
-  function walk(node) {
-    if ('fills' in node) collectPaintImages(node.fills);
-    if ('strokes' in node) collectPaintImages(node.strokes);
-
-    if ('children' in node) {
-      for (const child of node.children) {
-        walk(child);
+    for (const node of selection) {
+      walk(node);
+    }
+    const assets = [];
+    const usedPaths = /* @__PURE__ */ new Set();
+    for (const [hash, usageName] of imageUsageByHash.entries()) {
+      const image = figma.getImageByHash(hash);
+      if (!image) {
+        continue;
       }
+      const bytes = await image.getBytesAsync();
+      const extension = detectExtension(bytes);
+      const shortHash = hash.slice(0, 3).toLowerCase();
+      const path = buildUniquePath(usageName, shortHash, extension, usedPaths, hash);
+      assets.push({ hash, path, bytes });
     }
+    return assets;
   }
 
-  for (const node of selection) {
-    walk(node);
-  }
-
-  const assets = [];
-  for (const hash of imageHashes) {
-    const image = figma.getImageByHash(hash);
-    if (!image) {
-      continue;
-    }
-
-    const bytes = await image.getBytesAsync();
-    assets.push({ hash: hash, bytes: bytes });
-  }
-
-  return assets;
-}
-
-function buildPayload(selection, styles, tree, assets) {
-  return {
-    meta: {
-      version: 1,
-      fileName: figma.root.name,
-      pageName: figma.currentPage.name,
-      selectionCount: selection.length,
-      exportedAt: new Date().toISOString()
-    },
-    styles: styles,
-    tree: tree,
-    assets: assets
+  // src/constants.ts
+  var PLUGIN_MESSAGES = {
+    EXPORT_PAYLOAD: "export-payload",
+    EXPORT_DONE: "export-done",
+    EXPORT_FAILED: "export-failed"
   };
-}
 
-async function exportSelectionToZip() {
-  const selection = figma.currentPage.selection;
-  if (!selection.length) {
-    figma.notify('Select at least one frame/layer to export.');
-    figma.closePlugin();
-    return;
+  // src/payload.ts
+  function buildPayload(selection, tokens, tree, assets) {
+    return {
+      meta: {
+        version: 1,
+        fileName: figma.root.name,
+        pageName: figma.currentPage.name,
+        selectionCount: selection.length,
+        exportedAt: (/* @__PURE__ */ new Date()).toISOString()
+      },
+      tokens,
+      tree,
+      assets
+    };
   }
 
-  const styles = collectStylesFromSelection(selection);
-  const tree = [];
-  for (const node of selection) {
-    tree.push(serializeNode(node));
+  // src/serializer.ts
+  function getNodeImageHashes(node) {
+    const hashes = /* @__PURE__ */ new Set();
+    function collectFromPaints(paints) {
+      if (!paints || isMixed(paints)) {
+        return;
+      }
+      for (const paint of paints) {
+        if (paint && paint.type === "IMAGE" && paint.imageHash) {
+          hashes.add(paint.imageHash);
+        }
+      }
+    }
+    if ("fills" in node) {
+      collectFromPaints(node.fills);
+    }
+    if ("strokes" in node) {
+      collectFromPaints(node.strokes);
+    }
+    return Array.from(hashes);
   }
-  const assets = await collectImageAssetsFromSelection(selection);
-  const payload = buildPayload(selection, styles, tree, assets);
-
-  figma.ui.postMessage({ type: 'export-payload', payload: payload });
-}
-
-function handleUiMessage(message) {
-  if (message.type === 'export-done') {
-    figma.notify('Selection exported as ZIP.');
-    figma.closePlugin();
-    return;
+  function replaceImageHashesInValue(value, imagePathByHash) {
+    if (typeof value === "string") {
+      let next = value;
+      for (const [hash, path] of Object.entries(imagePathByHash)) {
+        if (next.includes(hash)) {
+          next = next.split(hash).join(path);
+        }
+      }
+      return next;
+    }
+    if (Array.isArray(value)) {
+      return value.map((item) => replaceImageHashesInValue(item, imagePathByHash));
+    }
+    if (!value || typeof value !== "object") {
+      return value;
+    }
+    const patched = {};
+    for (const [key, current] of Object.entries(value)) {
+      patched[key] = replaceImageHashesInValue(current, imagePathByHash);
+    }
+    return patched;
+  }
+  function patchCssPlaceholders(css, imagePaths) {
+    if (!css || typeof css !== "object" || Array.isArray(css)) {
+      return css;
+    }
+    const patched = {};
+    let imageIndex = 0;
+    for (const [key, value] of Object.entries(css)) {
+      if (typeof value === "string" && value.includes("<path-to-image>") && imagePaths.length) {
+        const resolvedPath = imagePaths[Math.min(imageIndex, imagePaths.length - 1)];
+        patched[key] = value.replace("<path-to-image>", resolvedPath);
+        imageIndex += 1;
+        continue;
+      }
+      patched[key] = value;
+    }
+    return patched;
+  }
+  async function getCss(node, imagePathByHash) {
+    if (!("getCSSAsync" in node)) {
+      return null;
+    }
+    try {
+      const css = await node.getCSSAsync();
+      const patchedCss = replaceImageHashesInValue(css, imagePathByHash);
+      const nodeImagePaths = getNodeImageHashes(node).map((hash) => imagePathByHash[hash]).filter((value) => Boolean(value));
+      return cleanValue(patchCssPlaceholders(patchedCss, nodeImagePaths));
+    } catch (e) {
+      return null;
+    }
+  }
+  function getText(node) {
+    if (node.type !== "TEXT") {
+      return null;
+    }
+    return node.characters;
+  }
+  function getNodeImages(node, imagePathByHash) {
+    return getNodeImageHashes(node).map((hash) => imagePathByHash[hash]).filter((value) => Boolean(value));
+  }
+  async function serializeNode(node, imagePathByHash) {
+    const serialized = {
+      id: node.id,
+      name: node.name,
+      type: node.type,
+      css: await getCss(node, imagePathByHash),
+      images: getNodeImages(node, imagePathByHash),
+      text: getText(node),
+      interactions: cleanValue("reactions" in node ? node.reactions : null)
+    };
+    if ("children" in node) {
+      serialized.children = await Promise.all(node.children.map((child) => serializeNode(child, imagePathByHash)));
+    }
+    return serialized;
   }
 
-  if (message.type === 'export-failed') {
-    const reason = message.error || 'Unknown error';
-    figma.notify('Failed to export ZIP: ' + reason);
-    figma.closePlugin();
+  // src/tokens.ts
+  function collectVariableAliasIds(value, into) {
+    if (!value) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        collectVariableAliasIds(item, into);
+      }
+      return;
+    }
+    if (typeof value !== "object") {
+      return;
+    }
+    const candidate = value;
+    if (candidate.type === "VARIABLE_ALIAS" && typeof candidate.id === "string") {
+      into.add(candidate.id);
+    }
+    for (const nested of Object.values(value)) {
+      collectVariableAliasIds(nested, into);
+    }
   }
-}
+  async function collectNodeVariableAliasIds(node, into) {
+    if ("boundVariables" in node) {
+      collectVariableAliasIds(node.boundVariables, into);
+    }
+    if (node.type === "TEXT") {
+      try {
+        const segments = await node.getStyledTextSegments(["boundVariables"]);
+        for (const segment of segments) {
+          collectVariableAliasIds(segment.boundVariables, into);
+        }
+      } catch (e) {
+      }
+    }
+    if ("children" in node) {
+      for (const child of node.children) {
+        await collectNodeVariableAliasIds(child, into);
+      }
+    }
+  }
+  async function collectTokens(selection) {
+    const variableIds = /* @__PURE__ */ new Set();
+    for (const node of selection) {
+      await collectNodeVariableAliasIds(node, variableIds);
+    }
+    const tokens = [];
+    for (const variableId of variableIds) {
+      const variable = await figma.variables.getVariableByIdAsync(variableId);
+      if (!variable) {
+        continue;
+      }
+      tokens.push({
+        key: variable.key,
+        name: variable.name,
+        type: variable.resolvedType,
+        value: cleanValue(variable.valuesByMode)
+      });
+    }
+    return tokens;
+  }
 
-figma.ui.onmessage = handleUiMessage;
-
-exportSelectionToZip();
+  // src/main.ts
+  figma.showUI(__html__, { visible: false });
+  async function exportSelectionToZip() {
+    const selection = figma.currentPage.selection;
+    if (!selection.length) {
+      figma.notify("Select at least one frame/layer to export.");
+      figma.closePlugin();
+      return;
+    }
+    const assets = await collectImageAssetsFromSelection(selection);
+    const imagePathByHash = Object.fromEntries(assets.map((asset) => [asset.hash, asset.path]));
+    const tree = await Promise.all(selection.map((node) => serializeNode(node, imagePathByHash)));
+    const tokens = await collectTokens(selection);
+    const payload = buildPayload(selection, tokens, tree, assets);
+    figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PAYLOAD, payload });
+  }
+  function handleUiMessage(message) {
+    if (message.type === PLUGIN_MESSAGES.EXPORT_DONE) {
+      figma.notify("Selection exported as ZIP.");
+      figma.closePlugin();
+      return;
+    }
+    if (message.type === PLUGIN_MESSAGES.EXPORT_FAILED) {
+      figma.notify(`Failed to export ZIP: ${message.error || "Unknown error"}`);
+      figma.closePlugin();
+    }
+  }
+  figma.ui.onmessage = handleUiMessage;
+  void exportSelectionToZip();
+})();
