@@ -1,7 +1,10 @@
+import type { ExportedAsset } from './assets';
+
 export function buildPayload(
   selection: ReadonlyArray<SceneNode>,
   tokens: Array<Record<string, unknown>>,
-  tree: Array<Record<string, unknown>>
+  tree: Array<Record<string, unknown>>,
+  assets: ExportedAsset[]
 ) {
   return {
     meta: {
@@ -12,6 +15,7 @@ export function buildPayload(
       exportedAt: new Date().toISOString()
     },
     tokens,
-    tree
+    tree,
+    assets
   };
 }
