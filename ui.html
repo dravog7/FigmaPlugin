@@ -136,8 +136,9 @@
       }
 
       function normalizePayload(payload) {
+        const sourceAssets = Array.isArray(payload.assets) ? payload.assets : [];
         const imagePathByHash = {};
-        const assets = payload.assets.map((asset) => {
+        const assets = sourceAssets.map((asset) => {
           const bytes = new Uint8Array(asset.bytes);
           const extension = detectExtension(bytes);
           const path = `assets/${asset.hash}.${extension}`;
@@ -166,12 +167,18 @@
           return next;
         }
 
+        const design = {
+          meta: payload.meta,
+          tokens: payload.tokens || [],
+          tree: payload.tree || []
+        };
+
+        if (Array.isArray(payload.styles)) {
+          design.styles = payload.styles;
+        }
+
         return {
-          design: patchImages({
-            meta: payload.meta,
-            styles: payload.styles,
-            tree: payload.tree
-          }),
+          design: patchImages(design),
           assets
         };
       }
