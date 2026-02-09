@@ -256,6 +256,7 @@
     themeColors: true
   });
   async function exportSelectionToZip() {
+    figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PROGRESS, label: "Preparing export\u2026" });
     const selection = figma.currentPage.selection;
     if (!selection.length) {
       figma.notify("Select at least one frame/layer to export.");

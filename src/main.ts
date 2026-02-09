@@ -11,6 +11,8 @@ figma.showUI(__html__, {
 });
 
 async function exportSelectionToZip() {
+  figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PROGRESS, label: 'Preparing export…' });
+
   const selection = figma.currentPage.selection;
 
   if (!selection.length) {
