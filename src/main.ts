@@ -2,7 +2,7 @@ import { collectImageAssetsFromSelection } from './assets';
 import { PLUGIN_MESSAGES } from './constants';
 import { buildPayload } from './payload';
 import { serializeNode } from './serializer';
-import { collectStylesFromSelection } from './styles';
+import { collectTokens } from './tokens';
 
 figma.showUI(__html__, { visible: false });
 
@@ -15,10 +15,11 @@ async function exportSelectionToZip() {
     return;
   }
 
-  const styles = collectStylesFromSelection(selection);
-  const tree = selection.map(serializeNode);
   const assets = await collectImageAssetsFromSelection(selection);
-  const payload = buildPayload(selection, styles, tree, assets);
+  const imagePathByHash = Object.fromEntries(assets.map((asset) => [asset.hash, asset.path]));
+  const tree = await Promise.all(selection.map((node) => serializeNode(node, imagePathByHash)));
+  const tokens = await collectTokens(selection);
+  const payload = buildPayload(selection, tokens as Array<Record<string, unknown>>, tree, assets);
 
   figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PAYLOAD, payload });
 }

@@ -2,7 +2,7 @@ import type { ExportedAsset } from './assets';
 
 export function buildPayload(
   selection: ReadonlyArray<SceneNode>,
-  styles: Array<Record<string, unknown>>,
+  tokens: Array<Record<string, unknown>>,
   tree: Array<Record<string, unknown>>,
   assets: ExportedAsset[]
 ) {
@@ -14,7 +14,7 @@ export function buildPayload(
       selectionCount: selection.length,
       exportedAt: new Date().toISOString()
     },
-    styles,
+    tokens,
     tree,
     assets
   };
