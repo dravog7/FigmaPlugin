@@ -40,7 +40,7 @@ function sanitizeForFileName(value: string): string {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 48);
+    .slice(0, 64);
 }
 
 function collectPaintImages(
@@ -61,13 +61,6 @@ function collectPaintImages(
   }
 }
 
-function clampUsageName(usageName: string): string {
-  if (usageName.length <= 96) {
-    return usageName;
-  }
-  return usageName.slice(0, 96);
-}
-
 function buildUniquePath(
   usageName: string,
   shortHash: string,
@@ -75,7 +68,8 @@ function buildUniquePath(
   usedPaths: Set<string>,
   fullHash: string
 ): string {
-  const baseName = `${clampUsageName(usageName)}-${shortHash}`;
+  const safeName = usageName || 'image';
+  const baseName = `${safeName}-${shortHash}`;
   let path = `assets/${baseName}.${extension}`;
 
   if (!usedPaths.has(path)) {
@@ -104,22 +98,21 @@ function buildUniquePath(
 export async function collectImageAssetsFromSelection(selection: ReadonlyArray<SceneNode>): Promise<ExportedAsset[]> {
   const imageUsageByHash = new Map<string, string>();
 
-  function walk(node: SceneNode, parentPath: string) {
-    const nodePart = sanitizeForFileName(node.name) || node.type.toLowerCase();
-    const usageName = parentPath ? `${parentPath}-${nodePart}` : nodePart;
+  function walk(node: SceneNode) {
+    const usageName = sanitizeForFileName(node.name) || node.type.toLowerCase();
 
     if ('fills' in node) collectPaintImages(node.fills, imageUsageByHash, usageName);
     if ('strokes' in node) collectPaintImages(node.strokes, imageUsageByHash, usageName);
 
     if ('children' in node) {
       for (const child of node.children) {
-        walk(child, usageName);
+        walk(child);
       }
     }
   }
 
   for (const node of selection) {
-    walk(node, '');
+    walk(node);
   }
 
   const assets: ExportedAsset[] = [];
@@ -134,7 +127,7 @@ export async function collectImageAssetsFromSelection(selection: ReadonlyArray<S
     const bytes = await image.getBytesAsync();
     const extension = detectExtension(bytes);
     const shortHash = hash.slice(0, 3).toLowerCase();
-    const path = buildUniquePath(usageName || 'image', shortHash, extension, usedPaths, hash);
+    const path = buildUniquePath(usageName, shortHash, extension, usedPaths, hash);
 
     assets.push({ hash, path, bytes });
   }

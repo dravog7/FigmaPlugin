@@ -1,6 +1,32 @@
-import { cleanValue } from './utils';
+import { cleanValue, isMixed } from './utils';
 
 type SerializedNode = Record<string, unknown>;
+
+function getNodeImageHashes(node: SceneNode): string[] {
+  const hashes = new Set<string>();
+
+  function collectFromPaints(paints: ReadonlyArray<Paint> | PluginAPI['mixed']) {
+    if (!paints || isMixed(paints)) {
+      return;
+    }
+
+    for (const paint of paints) {
+      if (paint && paint.type === 'IMAGE' && paint.imageHash) {
+        hashes.add(paint.imageHash);
+      }
+    }
+  }
+
+  if ('fills' in node) {
+    collectFromPaints(node.fills);
+  }
+
+  if ('strokes' in node) {
+    collectFromPaints(node.strokes);
+  }
+
+  return Array.from(hashes);
+}
 
 function replaceImageHashesInValue(value: unknown, imagePathByHash: Record<string, string>): unknown {
   if (typeof value === 'string') {
@@ -29,6 +55,28 @@ function replaceImageHashesInValue(value: unknown, imagePathByHash: Record<strin
   return patched;
 }
 
+function patchCssPlaceholders(css: unknown, imagePaths: string[]): unknown {
+  if (!css || typeof css !== 'object' || Array.isArray(css)) {
+    return css;
+  }
+
+  const patched: Record<string, unknown> = {};
+  let imageIndex = 0;
+
+  for (const [key, value] of Object.entries(css as Record<string, unknown>)) {
+    if (typeof value === 'string' && value.includes('<path-to-image>') && imagePaths.length) {
+      const resolvedPath = imagePaths[Math.min(imageIndex, imagePaths.length - 1)];
+      patched[key] = value.replace('<path-to-image>', resolvedPath);
+      imageIndex += 1;
+      continue;
+    }
+
+    patched[key] = value;
+  }
+
+  return patched;
+}
+
 async function getCss(node: SceneNode, imagePathByHash: Record<string, string>): Promise<unknown> {
   if (!('getCSSAsync' in node)) {
     return null;
@@ -37,7 +85,10 @@ async function getCss(node: SceneNode, imagePathByHash: Record<string, string>):
   try {
     const css = await (node as SceneNode & { getCSSAsync(): Promise<unknown> }).getCSSAsync();
     const patchedCss = replaceImageHashesInValue(css, imagePathByHash);
-    return cleanValue(patchedCss);
+    const nodeImagePaths = getNodeImageHashes(node)
+      .map((hash) => imagePathByHash[hash])
+      .filter((value): value is string => Boolean(value));
+    return cleanValue(patchCssPlaceholders(patchedCss, nodeImagePaths));
   } catch {
     return null;
   }
@@ -51,12 +102,19 @@ function getText(node: SceneNode): string | null {
   return node.characters;
 }
 
+function getNodeImages(node: SceneNode, imagePathByHash: Record<string, string>): string[] {
+  return getNodeImageHashes(node)
+    .map((hash) => imagePathByHash[hash])
+    .filter((value): value is string => Boolean(value));
+}
+
 export async function serializeNode(node: SceneNode, imagePathByHash: Record<string, string>): Promise<SerializedNode> {
   const serialized: SerializedNode = {
     id: node.id,
     name: node.name,
     type: node.type,
     css: await getCss(node, imagePathByHash),
+    images: getNodeImages(node, imagePathByHash),
     text: getText(node),
     interactions: cleanValue(('reactions' in node ? node.reactions : null) as unknown)
   };
