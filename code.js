@@ -118,6 +118,7 @@
 
   // src/constants.ts
   var PLUGIN_MESSAGES = {
+    EXPORT_PROGRESS: "export-progress",
     EXPORT_PAYLOAD: "export-payload",
     EXPORT_DONE: "export-done",
     EXPORT_FAILED: "export-failed"
@@ -249,7 +250,11 @@
   }
 
   // src/main.ts
-  figma.showUI(__html__, { visible: false });
+  figma.showUI(__html__, {
+    width: 320,
+    height: 120,
+    themeColors: true
+  });
   async function exportSelectionToZip() {
     const selection = figma.currentPage.selection;
     if (!selection.length) {
@@ -257,11 +262,15 @@
       figma.closePlugin();
       return;
     }
+    figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PROGRESS, label: "Collecting assets\u2026" });
     const assets = await collectImageAssetsFromSelection(selection);
     const imagePathByHash = Object.fromEntries(assets.map((asset) => [asset.hash, asset.path]));
+    figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PROGRESS, label: "Serializing selection\u2026" });
     const tree = await Promise.all(selection.map((node) => serializeNode(node, imagePathByHash)));
+    figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PROGRESS, label: "Collecting tokens\u2026" });
     const tokens = await collectTokens();
     const payload = buildPayload(selection, tokens, tree, assets);
+    figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PROGRESS, label: "Building ZIP\u2026" });
     figma.ui.postMessage({ type: PLUGIN_MESSAGES.EXPORT_PAYLOAD, payload });
   }
   function handleUiMessage(message) {
