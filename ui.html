@@ -184,6 +184,38 @@
         };
       }
 
+      function encodeToon(value) {
+        if (value === null) {
+          return 'null';
+        }
+
+        const kind = typeof value;
+        if (kind === 'boolean') {
+          return value ? 'true' : 'false';
+        }
+
+        if (kind === 'number') {
+          return Number.isFinite(value) ? String(value) : 'null';
+        }
+
+        if (kind === 'string') {
+          return JSON.stringify(value);
+        }
+
+        if (Array.isArray(value)) {
+          return `[${value.map(encodeToon).join(',')}]`;
+        }
+
+        const entries = Object.entries(value);
+        const body = entries
+          .map(([key, current]) => {
+            const encodedKey = /^[A-Za-z_][A-Za-z0-9_]*$/.test(key) ? key : JSON.stringify(key);
+            return `${encodedKey}:${encodeToon(current)}`;
+          })
+          .join(',');
+        return `{${body}}`;
+      }
+
       onmessage = (event) => {
         if (event.data.pluginMessage?.type !== 'export-payload') {
           return;
@@ -191,8 +223,8 @@
 
         try {
           const normalized = normalizePayload(event.data.pluginMessage.payload);
-          const designBytes = textEncoder.encode(JSON.stringify(normalized.design, null, 2));
-          const zipBytes = buildZip([{ path: 'design.json', data: designBytes }, ...normalized.assets]);
+          const designBytes = textEncoder.encode(`@TOON1\n${encodeToon(normalized.design)}`);
+          const zipBytes = buildZip([{ path: 'design.toon', data: designBytes }, ...normalized.assets]);
 
           const blob = new Blob([zipBytes], { type: 'application/zip' });
           const url = URL.createObjectURL(blob);

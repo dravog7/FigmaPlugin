@@ -2,10 +2,10 @@
 
 Export selected Figma nodes as a ZIP archive containing:
 
-- `design.json` with node tree, style references, and metadata
+- `design.toon` with node tree, style references, and metadata
 - `assets/` folder with image binaries used in fills/strokes
 
-Each image paint in `design.json` includes `imageRef` pointing to the matching file in `assets/`.
+Each image paint in `design.toon` includes `imageRef` pointing to the matching file in `assets/`.
 
 ## Development install (Figma Desktop)
 
@@ -36,5 +36,6 @@ Each image paint in `design.json` includes `imageRef` pointing to the matching f
 ## Notes
 
 - `code.js` is generated from TypeScript (`npm run build`).
+- `design.toon` uses a compact TOON text format (`@TOON1` + object notation) for smaller, LLM-friendly exports.
 - ZIP is generated in-browser without external dependencies.
 - Assets are stored as `assets/<image-hash>.<ext>` (`png`, `jpg`, `gif`, `bmp`, `webp`, or `bin`).
