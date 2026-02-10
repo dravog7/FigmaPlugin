@@ -1,3 +1,4 @@
+import { fromBuffer } from 'file-type/core';
 import { isMixed } from './utils';
 
 export type ExportedAsset = {
@@ -5,35 +6,6 @@ export type ExportedAsset = {
   path: string;
   bytes: Uint8Array;
 };
-
-function detectExtension(bytes: Uint8Array): string {
-  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
-    return 'png';
-  }
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return 'jpg';
-  }
-  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46) {
-    return 'gif';
-  }
-  if (bytes.length >= 2 && bytes[0] === 0x42 && bytes[1] === 0x4d) {
-    return 'bmp';
-  }
-  if (
-    bytes.length >= 12 &&
-    bytes[0] === 0x52 &&
-    bytes[1] === 0x49 &&
-    bytes[2] === 0x46 &&
-    bytes[3] === 0x46 &&
-    bytes[8] === 0x57 &&
-    bytes[9] === 0x45 &&
-    bytes[10] === 0x42 &&
-    bytes[11] === 0x50
-  ) {
-    return 'webp';
-  }
-  return 'bin';
-}
 
 function sanitizeForFileName(value: string): string {
   return value
@@ -95,37 +67,54 @@ function buildUniquePath(
   return path;
 }
 
-export async function collectImageAssetsFromSelection(selection: ReadonlyArray<SceneNode>): Promise<ExportedAsset[]> {
+export async function collectImageAssetsFromSelection(
+  selection: ReadonlyArray<SceneNode>,
+  onProgress?: (current: number, total: number) => void
+): Promise<ExportedAsset[]> {
   const imageUsageByHash = new Map<string, string>();
 
-  function walk(node: SceneNode) {
+  const stack: SceneNode[] = [...selection];
+
+  while (stack.length > 0) {
+    const node = stack.pop()!;
     const usageName = sanitizeForFileName(node.name) || node.type.toLowerCase();
 
     if ('fills' in node) collectPaintImages(node.fills, imageUsageByHash, usageName);
     if ('strokes' in node) collectPaintImages(node.strokes, imageUsageByHash, usageName);
 
     if ('children' in node) {
-      for (const child of node.children) {
-        walk(child);
+      // Push children to stack. Reversing ensures order is preserved if we popped from end,
+      // but for asset collection order doesn't strictly matter.
+      // Pushing directly means we traverse depth-first, right-to-left.
+      // To traverse left-to-right (visual order), we should push reversed children.
+      for (let i = node.children.length - 1; i >= 0; i--) {
+        stack.push(node.children[i]);
       }
     }
   }
 
-  for (const node of selection) {
-    walk(node);
-  }
-
   const assets: ExportedAsset[] = [];
   const usedPaths = new Set<string>();
+  const totalImages = imageUsageByHash.size;
+  let processedImages = 0;
 
   for (const [hash, usageName] of imageUsageByHash.entries()) {
+    processedImages++;
+    if (onProgress) {
+      onProgress(processedImages, totalImages);
+    }
+
     const image = figma.getImageByHash(hash);
     if (!image) {
       continue;
     }
 
     const bytes = await image.getBytesAsync();
-    const extension = detectExtension(bytes);
+
+    // Retrieve file type using library
+    const type = await fromBuffer(bytes);
+    const extension = type ? type.ext : 'bin';
+
     const shortHash = hash.slice(0, 3).toLowerCase();
     const path = buildUniquePath(usageName, shortHash, extension, usedPaths, hash);
 

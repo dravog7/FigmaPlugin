@@ -2,10 +2,88 @@
 <html>
   <head>
     <meta charset="utf-8" />
+    <style>
+      :root {
+        color-scheme: light dark;
+      }
+
+      body {
+        margin: 0;
+        padding: 16px;
+        font: 12px Inter, sans-serif;
+        color: #1f1f1f;
+        background: #ffffff;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        body {
+          color: #f5f5f5;
+          background: #2c2c2c;
+        }
+
+        .progress-track {
+          background: rgba(255, 255, 255, 0.2);
+        }
+      }
+
+      .title {
+        margin: 0 0 8px;
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      .status {
+        margin: 0 0 12px;
+        line-height: 1.4;
+      }
+
+      .progress-track {
+        position: relative;
+        width: 100%;
+        height: 6px;
+        border-radius: 999px;
+        overflow: hidden;
+        background: rgba(0, 0, 0, 0.12);
+      }
+
+      .progress-indicator {
+        position: absolute;
+        inset: 0;
+        width: 40%;
+        border-radius: inherit;
+        background: #18a0fb;
+        animation: indeterminate 1.1s ease-in-out infinite;
+      }
+
+      @keyframes indeterminate {
+        0% {
+          transform: translateX(-110%);
+        }
+
+        100% {
+          transform: translateX(280%);
+        }
+      }
+    </style>
   </head>
   <body>
+    <p class="title">Exporting selection</p>
+    <p id="status" class="status">Preparing export…</p>
+    <div class="progress-track" role="progressbar" aria-label="Export progress">
+      <div class="progress-indicator"></div>
+    </div>
+
     <script>
       const textEncoder = new TextEncoder();
+      const statusElement = document.getElementById('status');
+
+      function setStatus(label) {
+        if (!statusElement) {
+          return;
+        }
+
+        statusElement.textContent = label;
+      }
 
       function crc32(bytes) {
         let crc = -1;
@@ -185,11 +263,22 @@
       }
 
       onmessage = (event) => {
-        if (event.data.pluginMessage?.type !== 'export-payload') {
+        const message = event.data.pluginMessage;
+        if (!message) {
+          return;
+        }
+
+        if (message.type === 'export-progress' && typeof message.label === 'string') {
+          setStatus(message.label);
+          return;
+        }
+
+        if (message.type !== 'export-payload') {
           return;
         }
 
         try {
+          setStatus('Downloading ZIP…');
           const normalized = normalizePayload(event.data.pluginMessage.payload);
           const designBytes = textEncoder.encode(JSON.stringify(normalized.design, null, 2));
           const zipBytes = buildZip([{ path: 'design.json', data: designBytes }, ...normalized.assets]);
